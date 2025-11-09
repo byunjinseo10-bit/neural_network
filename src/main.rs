@@ -1,52 +1,110 @@
-use nalgebra::{Matrix3, matrix, vector};
-use std::iter::zip;
-use std::process::Output;
+use nalgebra::{ArrayStorage, Const, Matrix, Matrix3, Matrix3x4, OMatrix, Vector, matrix, vector};
+// use std::default;
+// use std::iter::zip;
+// use std::process::Output;
+use rand_distr::Distribution;
+type MatrixNM<const N: usize, const M: usize> =
+    Matrix<f64, Const<N>, Const<M>, ArrayStorage<f64, N, M>>;
+type VectorN<const N: usize> = Vector<f64, Const<N>, ArrayStorage<f64, N, 1>>;
+
+fn spiral_data<const SAMPLES: usize, const CLASSES: usize, const TOTAL: usize>()
+-> (MatrixNM<TOTAL, 2>, VectorN<TOTAL>) {
+    assert_eq!(TOTAL, SAMPLES * CLASSES);
+    let mut x = MatrixNM::<TOTAL, 2>::zeros();
+    let mut y = VectorN::zeros();
+    let normal = rand_distr::Normal::new(0., 0.2).unwrap();
+    let mut rng = rand::rng();
+
+    for class_number in 0..CLASSES {
+        for i in 0..SAMPLES {
+            let ix = class_number * SAMPLES + i;
+            let r = i as f64 / (SAMPLES as f64 - 1.);
+            let t = class_number as f64 * 4.
+                + (i as f64 / (SAMPLES as f64 - 1.)) * 4.
+                + normal.sample(&mut rng);
+            x[(ix, 0)] = r * (t * 2.5).sin();
+            x[(ix, 1)] = r * (t * 2.5).cos();
+            y[ix] = class_number as f64;
+        }
+    }
+    (x, y)
+}
+struct Layer<const I: usize, const N: usize> {
+    //inputs: Matrix3<f64>,
+    weights: MatrixNM<I, N>,
+    biases: VectorN<N>,
+}
+struct Activation_ReLu;
+impl Activation_ReLu {
+    pub fn forward<const N: usize, const M: usize>(self, input: MatrixNM<N, M>) -> MatrixNM<N, M> {
+        let mut output = input;
+        for i in 0..N {
+            for j in 0..M {
+                if input[(i, j)] > 0.0 {
+                    output[(i, j)] = input[(i, j)];
+                } else {
+                    output[(i, j)] = 0.0;
+                }
+            }
+        }
+        output
+        //
+    }
+}
+
+struct Activation_Softmax;
+impl Activation_Softmax {
+    pub fn forward<const I: usize, const J: usize>(self, input: MatrixNM<I, J>) -> MatrixNM<I, J> {
+        let mut result = input;
+        for i in 0..input.nrows() {
+            let row = input.row(i);
+            let max_val = row.max();
+            let exp_row = row.map(|v| (v - max_val).exp());
+            let sum_exp = exp_row.sum();
+            let softmax_row = exp_row / sum_exp;
+            result.set_row(i, &softmax_row);
+        }
+        result
+    }
+}
+
+impl<const I: usize, const N: usize> Layer<I, N> {
+    pub fn new() -> Self {
+        let weights = MatrixNM::<I, N>::new_random();
+        let biases = VectorN::<N>::new_random();
+
+        Self {
+            weights: weights,
+            biases: biases,
+        }
+    }
+    //M 입력의수
+    pub fn forward<const M: usize>(self, inputs: MatrixNM<M, I>) -> MatrixNM<M, N> {
+        //let weights = self.weights.transpose();
+        let m: [_; M] = std::array::from_fn(|_| self.biases.clone());
+        let m = MatrixNM::<N, M>::from_columns(&m);
+        //let m = Matrix3::from_columns(&[self.biases, self.biases, self.biases]);
+        //let m = m.transpose();
+        inputs * self.weights + m.transpose()
+    }
+}
+
 fn main() {
-    // let inputs = dvector![1.0, 2.0, 3.0, 2.5];
-    // let weights = dvector![0.2, 0.8, -0.5, 1.0];
-    // let bias = 2.0;
-    // let output = inputs.dot(&weights) + bias;
-    // println!("{}", output);
-
-    // let a = dvector![1.0, 2.0, 3.0];
-    // let b = dvector![4.0, 5.0, 6.0];
-    // let c = a.dot(&b);
-    // println!("{}", c);
-    let inputs = matrix![
-        1.0, 2.0, 3.0, 2.5;
-        2.0,5.0,-1.0,2.0;
-        -1.5,2.7,3.3,-0.8;
+    let inputs1 = matrix![
+        1.0, 2.0;
+        2.0,5.0;
+        4.0,3.0;
     ];
-    let weights = matrix! [
-        0.2, 0.8, -0.5, 1.0;
-        0.5, -0.91, 0.26, -0.5;
-        -0.26, -0.27, 0.17, 0.87;
-    ];
-    let weights = weights.transpose();
-    let weights2 = matrix! [
-        0.1, -0.14, 0.5;
-        -0.5, 0.12, -0.33;
-        -0.44, 0.73, -0.13;
-    ];
-    let weights2 = weights2.transpose();
-    let biases = vector![2.0, 3.0, 0.5];
-    let biases2 = vector![-1.0, 2.0, -0.5];
-    let m = Matrix3::from_columns(&[biases, biases, biases]);
-    let m = m.transpose();
-    let m2 = Matrix3::from_columns(&[biases2, biases2, biases2]);
-    let m2 = m2.transpose();
-    let layer_outputs1 = inputs * weights + m;
-    let layer_outputs2 = layer_outputs1 * weights2 + m2;
-
-    // layer_outputs= inputs.dot(&weights)
-    // for (neuron_weights, neuron_bias) in zip(weights, biases) {
-    //     let mut neuron_output = 0.0;
-    //     for (n_input, weight) in zip(inputs, neuron_weights) {
-    //         neuron_output += n_input * weight;
-    //     }
-    //     neuron_output += neuron_bias;
-    //     layer_outputs.push(neuron_output);
-    // }
-    // let output = inputs[0] * weights[0] + inputs[1] * weights[1] + inputs[2] * weights[2] + bias;
-    println!("{}, {}", layer_outputs1, layer_outputs2);
+    // let layer = Layer::<4, 4>::new();
+    // println!("{}", layer.forward(inputs));
+    let (x, y) = spiral_data::<100, 3, 300>();
+    let dense1 = Layer::<2, 3>::new();
+    let activation1 = Activation_ReLu;
+    let dense2 = Layer::<3, 3>::new();
+    let activation2 = Activation_Softmax;
+    let aa = dense1.forward(x);
+    let bb = activation1.forward(aa);
+    let cc = dense2.forward(bb);
+    let result = activation2.forward(cc);
+    println!("{result} , {y}");
 }
