@@ -7,6 +7,26 @@ type MatrixNM<const N: usize, const M: usize> =
     Matrix<f64, Const<N>, Const<M>, ArrayStorage<f64, N, M>>;
 type VectorN<const N: usize> = Vector<f64, Const<N>, ArrayStorage<f64, N, 1>>;
 
+struct Loss_CategoricalCrossentropy;
+
+impl Loss_CategoricalCrossentropy {
+    fn forward<const N: usize, const M: usize, const T: usize>(
+        self,
+        y_pred: MatrixNM<N, M>,
+        y_true: MatrixNM<T, 1>,
+    ) -> f64 {
+        //correct_cofidences=y_pred[range(N),y_true]
+        //let mut correct_cofidences = Vec::<f64>::new();
+        let mut mean = 0.0;
+        for i in 0..y_pred.nrows() {
+            let row = y_pred.row(i);
+            mean -= row[(0, y_true[i] as usize)].ln();
+        }
+        mean = mean / y_pred.nrows() as f64;
+        mean
+    }
+}
+
 fn spiral_data<const SAMPLES: usize, const CLASSES: usize, const TOTAL: usize>()
 -> (MatrixNM<TOTAL, 2>, VectorN<TOTAL>) {
     assert_eq!(TOTAL, SAMPLES * CLASSES);
@@ -90,11 +110,11 @@ impl<const I: usize, const N: usize> Layer<I, N> {
 }
 
 fn main() {
-    let inputs1 = matrix![
-        1.0, 2.0;
-        2.0,5.0;
-        4.0,3.0;
-    ];
+    // let inputs1 = matrix![
+    //     1.0, 2.0;
+    //     2.0,5.0;
+    //     4.0,3.0;
+    // ];
     // let layer = Layer::<4, 4>::new();
     // println!("{}", layer.forward(inputs));
     let (x, y) = spiral_data::<100, 3, 300>();
@@ -106,5 +126,8 @@ fn main() {
     let bb = activation1.forward(aa);
     let cc = dense2.forward(bb);
     let result = activation2.forward(cc);
-    println!("{result} , {y}");
+    let loss = Loss_CategoricalCrossentropy;
+    let loss = loss.forward(result, y);
+    println!("{loss}");
+    //println!("{result} , {y}");
 }
