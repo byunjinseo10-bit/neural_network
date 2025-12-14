@@ -3,8 +3,10 @@ use nalgebra::{
     ArrayStorage, Const, Matrix,
     /* , Matrix3, Matrix3x4, OMatrix,*/ Vector, /*  matrix, vector*/
 };
+use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use rand::Rng;
+
 use std::iter::Enumerate;
 // use std::default;
 use std::iter::zip;
@@ -143,7 +145,7 @@ impl<const N: usize, const M: usize> ActivationReLu<N, M> {
             dinputs: dinput,
         }
     }
-    pub fn forward(mut self, input: MatrixNM<N, M>) -> MatrixNM<N, M> {
+    pub fn forward(&mut self, input: MatrixNM<N, M>) -> MatrixNM<N, M> {
         self.inputs = input;
         let mut output = input;
         for i in 0..N {
@@ -187,7 +189,7 @@ impl<const I: usize, const J: usize> ActivationSoftmax<I, J> {
             dinputs: dinput,
         }
     }
-    pub fn forward(mut self, input: MatrixNM<I, J>) -> MatrixNM<I, J> {
+    pub fn forward(&mut self, input: MatrixNM<I, J>) -> MatrixNM<I, J> {
         self.inputs = input;
         let mut result = input;
         for i in 0..input.nrows() {
@@ -261,14 +263,70 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
     }
 }
 
-// fn graph() -> Result<(), Box<dyn std::error::Error>>{
-//     let root = BitMapBackend::new("plotters-doc-data/0.png", (640, 480)).into_drawing_area();
-//     root.fill(&WHITE)?;
-//     let mut chart = ChartBuilder::on(&root);
+fn graph(
+    pointx: MatrixNM<300, 2>,
+    what: MatrixNM<300, 1>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = BitMapBackend::new("0.png", (640, 480)).into_drawing_area();
+    root.fill(&WHITE)?;
+    let mut chart = ChartBuilder::on(&root)
+        .x_label_area_size(40)
+        .y_label_area_size(40)
+        .build_cartesian_2d(-1f64..1f64, -1f64..1f64)?;
+    let px = pointx.column(0);
+    let py = pointx.column(1);
+    let mut pxy = Vec::new();
+    predict(&chart);
+    for ii in 0..pointx.nrows() {
+        let mut color = RGBColor(0, 0, 0);
+        if what[ii] as usize == 0 {
+            color = RGBColor(255, 0, 0);
+        }
+        if what[ii] as usize == 1 {
+            color = RGBColor(0, 255, 0);
+        }
+        if what[ii] as usize == 2 {
+            color = RGBColor(0, 0, 255);
+        }
+        pxy.push((px[ii], py[ii], color));
+    }
 
-//     Ok(())
-// }
+    chart.configure_mesh().draw()?;
+    chart.draw_series(
+        pxy.iter()
+            .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
+    )?;
 
+    //chart.configure_mesh().draw()?;
+    root.present()?;
+    Ok(())
+}
+fn predict(
+    chart: &ChartContext<'_, BitMapBackend<'_>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+) {
+    let mut dense1 = Layer::<1, 2, 3>::new();
+    let mut activation1 = ActivationReLu::<1, 3>::new();
+    let mut dense2 = Layer::<1, 3, 3>::new();
+    let mut activation2 = ActivationSoftmax::<1, 3>::new();
+    for ii in -50..50 {
+        for jj in -50..50 {
+            let mut mt = MatrixNM::<1, 2>::zeros();
+            mt[(0, 0)] = (ii as f64 / 50 as f64);
+            mt[(0, 1)] = (jj as f64 / 50 as f64);
+
+            let aa = dense1.forward(mt);
+            let bb = activation1.forward(aa);
+            let cc = dense2.forward(bb);
+            let mut result = activation2.forward(cc);
+            let result = result.transpose().argmax();
+            let mut color = [RED, GREEN, BLUE][result.0].to_rgba();
+            color.3 = 0.1;
+
+            let circle = Circle::new((mt[(0, 0)], mt[(0, 1)]), 4, color.filled());
+            chart.plotting_area().draw(&circle).expect("error");
+        }
+    }
+}
 fn main() {
     // let inputs1 = matrix![
     //     1.0, 2.0;
@@ -277,11 +335,14 @@ fn main() {
     // ];
     // let layer = Layer::<4, 4>::new();
     // println!("{}", layer.forward(inputs));
+    let (x, y) = vertical_data::<100, 3, 300>();
+    graph(x, y).expect("error");
     let (x, y) = spiral_data::<100, 3, 300>();
+
     let mut dense1 = Layer::<300, 2, 3>::new();
-    let activation1 = ActivationReLu::<300, 3>::new();
+    let mut activation1 = ActivationReLu::<300, 3>::new();
     let mut dense2 = Layer::<300, 3, 3>::new();
-    let activation2 = ActivationSoftmax::<300, 3>::new();
+    let mut activation2 = ActivationSoftmax::<300, 3>::new();
     let aa = dense1.forward(x);
     let bb = activation1.forward(aa);
     let cc = dense2.forward(bb);
