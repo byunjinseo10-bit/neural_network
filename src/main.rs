@@ -5,7 +5,7 @@ use nalgebra::{
 };
 use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use rand::{Rng, random};
 // use rand_distr::num_traits::abs;
@@ -30,7 +30,7 @@ impl<const N: usize, const M: usize> LossCategoricalCrossentropy<N, M> {
         Self { dinputs: dinput }
     }
 
-    fn forward<const T: usize>(self, y_pred: MatrixNM<N, M>, y_true: MatrixNM<T, 1>) -> f64 {
+    fn forward<const T: usize>(&self, y_pred: MatrixNM<N, M>, y_true: MatrixNM<T, 1>) -> f64 {
         //correct_cofidences=y_pred[range(N),y_true]
         //let mut correct_cofidences = Vec::<f64>::new();
 
@@ -44,7 +44,7 @@ impl<const N: usize, const M: usize> LossCategoricalCrossentropy<N, M> {
         mean
     }
 
-    fn backward(mut self, dvalues: MatrixNM<N, M>, y_true: VectorN<N>) {
+    fn backward(&mut self, dvalues: MatrixNM<N, M>, y_true: VectorN<N>) {
         let samples = N;
         //let lables = M;
         let mut y_true_c = MatrixNM::<N, M>::zeros();
@@ -158,7 +158,7 @@ impl<const N: usize, const M: usize> ActivationReLu<N, M> {
         output
         //
     }
-    pub fn backward(mut self, dvalues: MatrixNM<N, M>) {
+    pub fn backward(&mut self, dvalues: MatrixNM<N, M>) -> MatrixNM<N, M> {
         self.dinputs = dvalues.clone();
         for ii in 0..N {
             for jj in 0..M {
@@ -167,6 +167,7 @@ impl<const N: usize, const M: usize> ActivationReLu<N, M> {
                 }
             }
         }
+        return self.dinputs;
     }
 }
 
@@ -201,7 +202,7 @@ impl<const I: usize, const J: usize> ActivationSoftmax<I, J> {
         self.outputs = result.clone();
         result
     }
-    pub fn backward(mut self, dvalues: MatrixNM<I, J>) {
+    pub fn backward(&mut self, dvalues: MatrixNM<I, J>) {
         let temp = MatrixNM::<I, J>::zeros();
         self.dinputs = temp;
         //let single_output = MatrixNM::<I, J>::zeros();
@@ -256,7 +257,7 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
         inputs * self.weights + m.transpose()
     }
 
-    pub fn backward(mut self, dvalues: MatrixNM<M, N>) {
+    pub fn backward(&mut self, dvalues: MatrixNM<M, N>) -> MatrixNM<M, I> {
         self.dweights = self.inputs.transpose() * dvalues;
         let mut sum = MatrixNM::<N, 1>::zeros();
         for ii in dvalues.row_iter() {
@@ -266,6 +267,50 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
         }
         self.dbiases = sum;
         self.dinputs = dvalues * self.weights.transpose();
+        return self.dinputs;
+    }
+}
+struct Activation_Softmax_Loss_CategoricalCrossentropy<const I: usize, const J: usize> {
+    activation: ActivationSoftmax<I, J>,
+    loss: LossCategoricalCrossentropy<I, J>,
+    output: MatrixNM<I, J>,
+    dinputs: MatrixNM<I, J>,
+}
+impl<const I: usize, const J: usize> Activation_Softmax_Loss_CategoricalCrossentropy<I, J> {
+    fn new() -> Self {
+        let activation1 = ActivationSoftmax::<I, J>::new();
+        let loss1 = LossCategoricalCrossentropy::<I, J>::new();
+        let output1 = MatrixNM::<I, J>::zeros();
+        let dinput1 = MatrixNM::<I, J>::zeros();
+
+        Self {
+            activation: activation1,
+            loss: loss1,
+            output: output1,
+            dinputs: dinput1,
+        }
+    }
+    fn forward(&mut self, inputs: MatrixNM<I, J>, y_true: MatrixNM<I, 1>) -> f64 {
+        self.output = self.activation.forward(inputs);
+        return self.loss.forward(self.output, y_true).clone();
+    }
+
+    fn backward(&mut self, dvalues: MatrixNM<I, J>, y_true: MatrixNM<I, 1>) -> MatrixNM<I, J> {
+        let samples = dvalues.nrows();
+        self.dinputs = dvalues.clone();
+        for ii in 0..I {
+            self.dinputs[(ii, y_true[(ii, 0)] as usize)] += -1.0;
+        }
+        self.dinputs = self.dinputs / samples as f64;
+        return self.dinputs;
+    }
+}
+
+struct Optimizer_SGD<const M: usize, const I: usize, const N: usize>;
+impl<const M: usize, const I: usize, const N: usize> Optimizer_SGD<M, I, N> {
+    fn update_params(&self, layer: &mut Layer<M, I, N>) {
+        layer.weights += -layer.dweights;
+        layer.biases += -layer.dbiases;
     }
 }
 
@@ -276,10 +321,8 @@ fn graph(
     dense2: Layer<300, 3, 3>,
     num: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // let handle = thread::spawn(move || {
-
-    // });
     let p = format!("image/{}.png", num);
+    println!("{}", num);
     let root = BitMapBackend::new(&p, (640, 480)).into_drawing_area();
     root.fill(&WHITE)?;
     let mut chart = ChartBuilder::on(&root)
@@ -348,44 +391,50 @@ fn randlearn(
     x: MatrixNM<300, 2>,
     y: MatrixNM<300, 1>,
 ) {
-    let mut loss_lowest = 99999.0;
-    let mut best_dense1_w = dense1.weights.clone();
-    let mut best_dense1_b = dense1.biases.clone();
-    let mut best_dense2_w = dense2.weights.clone();
-    let mut best_dense2_b = dense2.biases.clone();
+    // let mut loss_lowest = 99999.0;
+    // let mut best_dense1_w = dense1.weights.clone();
+    // let mut best_dense1_b = dense1.biases.clone();
+    // let mut best_dense2_w = dense2.weights.clone();
+    // let mut best_dense2_b = dense2.biases.clone();
     let mut activation1 = ActivationReLu::<300, 3>::new();
     let mut activation2 = ActivationSoftmax::<300, 3>::new();
-
+    let mut loss_activation = Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new();
+    let mut th = Vec::new();
     for iteration in 0..=10000 {
         let loss_func = LossCategoricalCrossentropy::<300, 3>::new();
-        dense1.weights += 0.05 * MatrixNM::new_random();
-        dense1.biases += 0.05 * MatrixNM::new_random();
-        dense2.weights += 0.05 * MatrixNM::new_random();
-        dense2.biases += 0.05 * MatrixNM::new_random();
+        // dense1.weights += 0.05 * MatrixNM::new_random();
+        // dense1.biases += 0.05 * MatrixNM::new_random();
+        // dense2.weights += 0.05 * MatrixNM::new_random();
+        // dense2.biases += 0.05 * MatrixNM::new_random();
+
         let aa = dense1.forward(x);
         let bb = activation1.forward(aa);
         let cc = dense2.forward(bb);
         let result = activation2.forward(cc);
-        let loss = loss_func.forward(result, y);
+        let loss = loss_activation.forward(result, y);
         let acc = accuracy(result, y);
         //println!("{},{}", result, y);
-        if loss < loss_lowest {
-            println!("{loss},{acc}");
 
-            best_dense1_w = dense1.weights.clone();
-            best_dense1_b = dense1.biases.clone();
-            best_dense2_w = dense2.weights.clone();
-            best_dense2_b = dense2.biases.clone();
-            loss_lowest = loss;
-        } else {
-            dense1.weights = best_dense1_w.clone();
-            dense2.weights = best_dense2_w.clone();
-            dense1.biases = best_dense1_b.clone();
-            dense2.biases = best_dense2_b.clone();
-        }
+        let dinputs = loss_activation.backward(result, y);
+        let d2b = dense2.backward(dinputs);
+        let a1b = activation1.backward(d2b);
+        let d1b = dense1.backward(a1b);
+        let optimizer1 = Optimizer_SGD::<300, 2, 3>;
+        let optimizer2 = Optimizer_SGD::<300, 3, 3>;
+        optimizer1.update_params(&mut dense1);
+        optimizer2.update_params(&mut dense2);
+        println!("{loss:.3},{acc:.3}");
+
         if iteration % 100 == 0 {
-            graph(x, y, dense1.clone(), dense2.clone(), iteration / 100).expect("error");
+            let d1c = dense1.clone();
+            let d2c = dense2.clone();
+            th.push(std::thread::spawn(move || {
+                graph(x, y, d1c, d2c, iteration).expect("error")
+            }));
         }
+    }
+    for th in th {
+        th.join().unwrap();
     }
 }
 
@@ -397,9 +446,9 @@ fn main() {
     // ];
     // let layer = Layer::<4, 4>::new();
     // println!("{}", layer.forward(inputs));
-    let (x, y) = vertical_data::<100, 3, 300>();
+    //let (x, y) = vertical_data::<100, 3, 300>();
 
-    // let (x, y) = spiral_data::<100, 3, 300>();
+    let (x, y) = spiral_data::<100, 3, 300>();
 
     let dense1 = Layer::<300, 2, 3>::new();
     //let activation1 = ActivationReLu::<300, 3>::new();
