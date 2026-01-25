@@ -229,6 +229,8 @@ struct Layer<const M: usize, const I: usize, const N: usize> {
 
     weights_momentum: Box<MatrixNM<I, N>>,
     biases_momentum: Box<VectorN<N>>,
+    weights_cache: Box<MatrixNM<I, N>>,
+    biases_cache: Box<VectorN<N>>,
 }
 impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
     pub fn new() -> Self {
@@ -243,6 +245,8 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
         let dbiases = VectorN::<N>::zeros();
         let weights_momentum = MatrixNM::<I, N>::zeros();
         let biases_momentum = VectorN::<N>::zeros();
+        let weights_cache = MatrixNM::<I, N>::zeros();
+        let biases_cache = VectorN::<N>::zeros();
         Self {
             inputs: Box::new(input),
             weights: Box::new(weights),
@@ -252,6 +256,8 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
             dbiases: Box::new(dbiases),
             weights_momentum: Box::new(weights_momentum),
             biases_momentum: Box::new(biases_momentum),
+            weights_cache: Box::new(weights_cache),
+            biases_cache: Box::new(biases_cache),
         }
     }
     //M 입력의수
@@ -339,16 +345,17 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_Adagrad<M, I, N> 
         let epsilon = 1e-7;
 
         let learning_rate = learning_rate * (1.0 / (1. + learning_decay * (num as f64)));
-        layer.weights_momentum =
-            Box::new(*layer.weights_momentum + layer.dweights.map(|aa| aa * aa));
-        layer.biases_momentum = Box::new(*layer.biases_momentum + layer.biases.map(|aa| aa * aa));
+        layer.weights_cache = Box::new(*layer.weights_cache + layer.dweights.map(|aa| aa * aa));
+
+        layer.biases_cache = Box::new(*layer.biases_cache + layer.dbiases.map(|aa| aa * aa));
+
         layer.weights = Box::new(
             *layer.weights
                 - learning_rate
                     * (layer
                         .dweights
-                        .zip_map(&*layer.weights_momentum, |dweights, weights_momentum| {
-                            dweights / (weights_momentum.sqrt() + epsilon)
+                        .zip_map(&*layer.weights_cache, |dweights, weights_cache| {
+                            dweights / (weights_cache.sqrt() + epsilon)
                         })),
         );
         layer.biases = Box::new(
@@ -356,19 +363,114 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_Adagrad<M, I, N> 
                 - learning_rate
                     * (layer
                         .dbiases
-                        .zip_map(&*layer.biases_momentum, |dbiases, biases_momentum| {
-                            dbiases / (biases_momentum.sqrt() + epsilon)
+                        .zip_map(&*layer.biases_cache, |dbiases, biases_cache| {
+                            dbiases / (biases_cache.sqrt() + epsilon)
                         })),
         );
     }
 }
 
+struct Optimizer_RMS<const M: usize, const I: usize, const N: usize>;
+impl<const M: usize, const I: usize, const N: usize> Optimizer_RMS<M, I, N> {
+    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+        let rho = 0.999;
+        let learning_rate = 0.02;
+        let learning_decay = 1e-5;
+        let epsilon = 1e-7;
+
+        let learning_rate = learning_rate * (1.0 / (1. + learning_decay * (num as f64)));
+
+        layer.weights_cache =
+            Box::new(*layer.weights_cache * rho + (1.0 - rho) * layer.dweights.map(|aa| aa * aa));
+
+        layer.biases_cache =
+            Box::new(*layer.biases_cache * rho + (1.0 - rho) * layer.dbiases.map(|aa| aa * aa));
+
+        layer.weights = Box::new(
+            *layer.weights
+                - learning_rate
+                    * (layer
+                        .dweights
+                        .zip_map(&*layer.weights_cache, |dweights, weights_cache| {
+                            dweights / (weights_cache.sqrt() + epsilon)
+                        })),
+        );
+        layer.biases = Box::new(
+            *layer.biases
+                - learning_rate
+                    * (layer
+                        .dbiases
+                        .zip_map(&*layer.biases_cache, |dbiases, biases_cache| {
+                            dbiases / (biases_cache.sqrt() + epsilon)
+                        })),
+        );
+    }
+}
+struct Optimizer_Adam<const M: usize, const I: usize, const N: usize>;
+impl<const M: usize, const I: usize, const N: usize> Optimizer_Adam<M, I, N> {
+    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+        let beta_1 = 0.9;
+        let beta_2 = 0.999;
+        let learning_rate = 0.05;
+        let learning_decay = 5e-7;
+        let epsilon = 1e-7;
+
+        let learning_rate = learning_rate * (1.0 / (1. + learning_decay * (num as f64)));
+
+        let weights_update = beta_1 * *layer.weights_momentum + *layer.dweights * (1.0 - beta_1);
+        let biases_update = beta_1 * *layer.biases_momentum + *layer.dbiases * (1.0 - beta_1);
+
+        layer.weights_momentum = Box::new(weights_update);
+        layer.biases_momentum = Box::new(biases_update);
+
+        let weight_momentums_corrected = &layer
+            .weights_momentum
+            .map(|aa| aa / (1.0 - beta_1.powi(num as i32 + 1)));
+
+        let biases_momentums_corrected = &layer
+            .biases_momentum
+            .map(|aa| aa / (1.0 - beta_1.powi(num as i32 + 1)));
+
+        layer.weights_cache = Box::new(
+            *layer.weights_cache * beta_2 + (1.0 - beta_2) * layer.dweights.map(|aa| aa * aa),
+        );
+
+        layer.biases_cache = Box::new(
+            *layer.biases_cache * beta_2 + (1.0 - beta_2) * layer.dbiases.map(|aa| aa * aa),
+        );
+
+        let weight_cache_corrected = &layer
+            .weights_cache
+            .map(|aa| aa / (1.0 - beta_2.powi(num as i32 + 1)));
+
+        let biases_cache_corrected = &layer
+            .biases_cache
+            .map(|aa| aa / (1.0 - beta_2.powi(num as i32 + 1)));
+
+        layer.weights = Box::new(
+            *layer.weights
+                - learning_rate
+                    * (weight_momentums_corrected
+                        .zip_map(weight_cache_corrected, |momentum, weights_cache| {
+                            momentum / (weights_cache.sqrt() + epsilon)
+                        })),
+        );
+        layer.biases = Box::new(
+            *layer.biases
+                - learning_rate
+                    * (biases_momentums_corrected
+                        .zip_map(biases_cache_corrected, |momentum, biases_cache| {
+                            momentum / (biases_cache.sqrt() + epsilon)
+                        })),
+        );
+    }
+}
 fn graph(
     pointx: MatrixNM<300, 2>,
     what: MatrixNM<300, 1>,
-    dense1: &mut Layer<300, 2, 35>,
-    dense2: &mut Layer<300, 35, 3>,
-    activation1: &mut ActivationReLu<300, 35>,
+    dense1: &mut Layer<300, 2, 64>,
+    dense2: &mut Layer<300, 64, 3>,
+    activation1: &mut ActivationReLu<300, 64>,
     activation2: &mut ActivationSoftmax<300, 3>,
     num: usize,
     lossnacc: &Vec<(f64, f64)>,
@@ -453,12 +555,12 @@ fn graph(
 }
 fn predict(
     chart: &ChartContext<'_, BitMapBackend<'_>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-    dense1: &mut Layer<300, 2, 35>,
-    dense2: &mut Layer<300, 35, 3>,
-    activation1: &mut ActivationReLu<300, 35>,
+    dense1: &mut Layer<300, 2, 64>,
+    dense2: &mut Layer<300, 64, 3>,
+    activation1: &mut ActivationReLu<300, 64>,
     activation2: &mut ActivationSoftmax<300, 3>,
 ) {
-    //let mut activation1 = ActivationReLu::<300, 35>::new();
+    //let mut activation1 = ActivationReLu::<300, 64>::new();
 
     //let mut activation2 = ActivationSoftmax::<300, 3>::new();
     for ii in -50..50 {
@@ -488,8 +590,8 @@ fn predict(
     }
 }
 fn randlearn(
-    dense1: &mut Layer<300, 2, 35>,
-    dense2: &mut Layer<300, 35, 3>,
+    dense1: &mut Layer<300, 2, 64>,
+    dense2: &mut Layer<300, 64, 3>,
     x: MatrixNM<300, 2>,
     y: MatrixNM<300, 1>,
 ) {
@@ -498,7 +600,7 @@ fn randlearn(
     // let mut best_dense1_b = dense1.biases.clone();
     // let mut best_dense2_w = dense2.weights.clone();
     // let mut best_dense2_b = dense2.biases.clone();
-    let mut activation1 = Box::new(ActivationReLu::<300, 35>::new());
+    let mut activation1 = Box::new(ActivationReLu::<300, 64>::new());
     let mut activation2 = Box::new(ActivationSoftmax::<300, 3>::new());
     let mut loss_activation =
         Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
@@ -524,8 +626,8 @@ fn randlearn(
         let d2b = dense2.backward(dinputs);
         let a1b = activation1.backward(d2b);
         dense1.backward(a1b);
-        let optimizer1 = Optimizer_SGD::<300, 2, 35>;
-        let optimizer2 = Optimizer_SGD::<300, 35, 3>;
+        let optimizer1 = Optimizer_Adam::<300, 2, 64>;
+        let optimizer2 = Optimizer_Adam::<300, 64, 3>;
         optimizer1.update_params(dense1, iteration);
         optimizer2.update_params(dense2, iteration);
         println!("{loss:.3},{acc:.3}");
@@ -554,33 +656,12 @@ fn randlearn(
 }
 
 fn main() {
-    // let inputs1 = matrix![
-    //     1.0, 2.0;
-    //     2.0,5.0;
-    //     4.0,3.0;
-    // ];
-    // let layer = Layer::<4, 4>::new();
-    // println!("{}", layer.forward(inputs));
-    //let (x, y) = vertical_data::<100, 3, 300>();
-
+    
     let (x, y) = spiral_data::<100, 3, 300>();
 
-    let mut dense1 = Box::new(Layer::<300, 2, 35>::new());
+    let mut dense1 = Box::new(Layer::<300, 2, 64>::new());
     //let activation1 = ActivationReLu::<300, 3>::new();
-
-    let mut dense2 = Box::new(Layer::<300, 35, 3>::new());
-
-    //let activation2 = ActivationSoftmax::<300, 3>::new();
+    let mut dense2 = Box::new(Layer::<300, 64, 3>::new());
     randlearn(&mut dense1, &mut dense2, x, y);
-
-    // let aa = dense1.forward(x);
-    // let bb = activation1.forward(aa);
-    // let cc = dense2.forward(bb);
-    // let result = activation2.forward(cc);
-    // let loss = LossCategoricalCrossentropy::<300, 3>::new();
-
-    // let loss = loss.forward(result, y);
-    // let acc = accuracy(result, y);
-    // println!("{loss},{acc}");
-    //println!("{result} , {y}");
+    
 }
