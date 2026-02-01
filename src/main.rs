@@ -7,6 +7,7 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 //use std::thread::{self, JoinHandle};
 
+use plotters::style::full_palette::PURPLE;
 use rand::Rng;
 // use rand_distr::num_traits::abs;
 
@@ -320,9 +321,21 @@ impl<const I: usize, const J: usize> Activation_Softmax_Loss_CategoricalCrossent
     }
 }
 
-struct Optimizer_SGD<const M: usize, const I: usize, const N: usize>;
-impl<const M: usize, const I: usize, const N: usize> Optimizer_SGD<M, I, N> {
-    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+trait Optimizer {
+    fn update_params<const M: usize, const I: usize, const N: usize>(
+        &self,
+        layer: &mut Layer<M, I, N>,
+        num: usize,
+    );
+}
+
+struct Optimizer_SGD;
+impl Optimizer for Optimizer_SGD {
+    fn update_params<const M: usize, const I: usize, const N: usize>(
+        &self,
+        layer: &mut Layer<M, I, N>,
+        num: usize,
+    ) {
         let learning_rate = 1.0;
         let learning_decay = 0.001;
         let momentum = 0.9;
@@ -337,9 +350,13 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_SGD<M, I, N> {
         layer.biases_momentum = Box::new(biases_update);
     }
 }
-struct Optimizer_Adagrad<const M: usize, const I: usize, const N: usize>;
-impl<const M: usize, const I: usize, const N: usize> Optimizer_Adagrad<M, I, N> {
-    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+struct Optimizer_Adagrad;
+impl Optimizer for Optimizer_Adagrad {
+    fn update_params<const M: usize, const I: usize, const N: usize>(
+        &self,
+        layer: &mut Layer<M, I, N>,
+        num: usize,
+    ) {
         let learning_rate = 1.0;
         let learning_decay = 1e-4;
         let epsilon = 1e-7;
@@ -370,9 +387,13 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_Adagrad<M, I, N> 
     }
 }
 
-struct Optimizer_RMS<const M: usize, const I: usize, const N: usize>;
-impl<const M: usize, const I: usize, const N: usize> Optimizer_RMS<M, I, N> {
-    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+struct Optimizer_RMS;
+impl Optimizer for Optimizer_RMS {
+    fn update_params<const M: usize, const I: usize, const N: usize>(
+        &self,
+        layer: &mut Layer<M, I, N>,
+        num: usize,
+    ) {
         let rho = 0.999;
         let learning_rate = 0.02;
         let learning_decay = 1e-5;
@@ -406,9 +427,13 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_RMS<M, I, N> {
         );
     }
 }
-struct Optimizer_Adam<const M: usize, const I: usize, const N: usize>;
-impl<const M: usize, const I: usize, const N: usize> Optimizer_Adam<M, I, N> {
-    fn update_params(&self, layer: &mut Layer<M, I, N>, num: usize) {
+struct Optimizer_Adam;
+impl Optimizer for Optimizer_Adam {
+    fn update_params<const M: usize, const I: usize, const N: usize>(
+        &self,
+        layer: &mut Layer<M, I, N>,
+        num: usize,
+    ) {
         let beta_1 = 0.9;
         let beta_2 = 0.999;
         let learning_rate = 0.05;
@@ -468,101 +493,134 @@ impl<const M: usize, const I: usize, const N: usize> Optimizer_Adam<M, I, N> {
 fn graph(
     pointx: MatrixNM<300, 2>,
     what: MatrixNM<300, 1>,
-    dense1: &mut Layer<300, 2, 64>,
-    dense2: &mut Layer<300, 64, 3>,
-    activation1: &mut ActivationReLu<300, 64>,
-    activation2: &mut ActivationSoftmax<300, 3>,
-    num: usize,
-    lossnacc: &Vec<(f64, f64)>,
+    testx: MatrixNM<300, 2>,
+    what_t: MatrixNM<300, 1>,
+    mut dense1: Vec<Vec<(Layer<300, 2, 64>, Layer<300, 64, 3>)>>,
+    lossnacc: Vec<Vec<(f64, f64)>>,
+    lossnacc_t: Vec<Vec<(f64, f64)>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let p = format!("image/{}.png", num);
-    println!("{}", num);
-    let root = BitMapBackend::new(&p, (1000, 480)).into_drawing_area();
-    root.fill(&WHITE)?;
-    let (left, right) = root.split_horizontally(600);
-    let mut chart = ChartBuilder::on(&left)
-        // .x_label_area_size(40)
-        // .y_label_area_size(40)
-        .build_cartesian_2d(-1f64..1f64, -1f64..1f64)?;
-    let px = pointx.column(0);
-    let py = pointx.column(1);
-    let mut pxy = Vec::new();
-    predict(&chart, dense1, dense2, activation1, activation2);
-    for ii in 0..pointx.nrows() {
-        let mut color = RGBColor(0, 0, 0);
-        if what[ii] as usize == 0 {
-            color = RGBColor(255, 0, 0);
-        }
-        if what[ii] as usize == 1 {
-            color = RGBColor(0, 255, 0);
-        }
-        if what[ii] as usize == 2 {
-            color = RGBColor(0, 0, 255);
-        }
-        pxy.push((px[ii], py[ii], color));
-    }
+    for ii in 0..=10 {
+        let p = format!("image/{}.png", ii);
 
-    chart
-        .configure_mesh()
-        .disable_axes()
-        .disable_mesh()
-        .draw()?;
-    chart.draw_series(
-        pxy.iter()
-            .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
-    )?;
-    let loss_max = lossnacc
-        .iter()
-        .map(|x| x.0)
-        .max_by(|a, b| a.total_cmp(b))
-        .unwrap();
-    // let loss_min = lossnacc
-    //     .iter()
-    //     .map(|x| x.0)
-    //     .min_by(|a, b| a.total_cmp(b))
-    //     .unwrap();
-    // let acc_max = lossnacc
-    //     .iter()
-    //     .map(|x| x.1)
-    //     .max_by(|a, b| a.total_cmp(b))
-    //     .unwrap();
-    // let acc_min = lossnacc
-    //     .iter()
-    //     .map(|x| x.1)
-    //     .min_by(|a, b| a.total_cmp(b))
-    //     .unwrap();
-    let (up, down) = right.split_vertically(240);
-    let mut loss_chart = ChartBuilder::on(&up)
-        .x_label_area_size(10)
-        .y_label_area_size(10)
-        .build_cartesian_2d(0..10000usize, 0f64..loss_max)?;
-    let mut acc_chart = ChartBuilder::on(&down)
-        .x_label_area_size(10)
-        .y_label_area_size(10)
-        .build_cartesian_2d(0..10000usize, 0f64..1f64)?;
-    loss_chart.configure_mesh().draw()?;
-    loss_chart.draw_series(LineSeries::new(
-        lossnacc.iter().enumerate().map(|loss| (loss.0, loss.1.0)),
-        &RED,
-    ))?;
-    acc_chart.configure_mesh().draw()?;
-    acc_chart.draw_series(LineSeries::new(
-        lossnacc.iter().enumerate().map(|loss| (loss.0, loss.1.1)),
-        &RED,
-    ))?;
-    root.present()?;
+        let root = BitMapBackend::new(&p, (1000, 1920)).into_drawing_area();
+        root.fill(&WHITE)?;
+        let (areas) = root.split_evenly((4, 1));
+        for (index, root) in areas.iter().enumerate() {
+            let (left, right) = root.split_horizontally(600);
+            let mut chart = ChartBuilder::on(&left)
+                // .x_label_area_size(40)
+                // .y_label_area_size(40)
+                .build_cartesian_2d(-1f64..1f64, -1f64..1f64)?;
+            let px = pointx.column(0);
+            let py = pointx.column(1);
+            let mut pxy = Vec::new();
+            predict(
+                &chart,
+                &mut dense1[index][ii].0.clone(),
+                &mut dense1[index][ii].1.clone(),
+            );
+            for ii in 0..pointx.nrows() {
+                let mut color = RGBColor(0, 0, 0);
+                if what[ii] as usize == 0 {
+                    color = RGBColor(255, 0, 0);
+                }
+                if what[ii] as usize == 1 {
+                    color = RGBColor(0, 255, 0);
+                }
+                if what[ii] as usize == 2 {
+                    color = RGBColor(0, 0, 255);
+                }
+                pxy.push((px[ii], py[ii], color));
+            }
+            let px = testx.column(0);
+            let py = testx.column(1);
+            let mut pxy_t = Vec::new();
+            for ii in 0..testx.nrows() {
+                let mut color = RGBColor(0, 0, 0);
+                if what_t[ii] as usize == 0 {
+                    color = RGBColor(255, 0, 0);
+                }
+                if what_t[ii] as usize == 1 {
+                    color = RGBColor(0, 255, 0);
+                }
+                if what_t[ii] as usize == 2 {
+                    color = RGBColor(0, 0, 255);
+                }
+                pxy_t.push((px[ii], py[ii], color));
+            }
+            chart
+                .configure_mesh()
+                .disable_axes()
+                .disable_mesh()
+                .draw()?;
+            chart.draw_series(
+                pxy.iter()
+                    .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
+            )?;
+            chart.draw_series(
+                pxy_t
+                    .iter()
+                    .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
+            )?;
+            let loss_max = lossnacc[index]
+                .iter()
+                .map(|x| x.0)
+                .max_by(|a, b| a.total_cmp(b))
+                .unwrap();
+
+            let (up, down) = right.split_vertically(240);
+
+            let mut loss_chart = ChartBuilder::on(&up)
+                .x_label_area_size(10)
+                .y_label_area_size(10)
+                .build_cartesian_2d(0..10000usize, 0f64..loss_max)?;
+            let mut acc_chart = ChartBuilder::on(&down)
+                .x_label_area_size(10)
+                .y_label_area_size(10)
+                .build_cartesian_2d(0..10000usize, 0f64..1f64)?;
+            loss_chart.configure_mesh().draw()?;
+            loss_chart.draw_series(LineSeries::new(
+                lossnacc[index]
+                    .iter()
+                    .enumerate()
+                    .map(|loss| (loss.0, loss.1.0)),
+                &RED,
+            ))?;
+            loss_chart.draw_series(LineSeries::new(
+                lossnacc_t[index]
+                    .iter()
+                    .enumerate()
+                    .map(|loss| (loss.0, loss.1.0)),
+                &PURPLE,
+            ))?;
+
+            acc_chart.configure_mesh().draw()?;
+            acc_chart.draw_series(LineSeries::new(
+                lossnacc[index]
+                    .iter()
+                    .enumerate()
+                    .map(|loss| (loss.0, loss.1.1)),
+                &RED,
+            ))?;
+            acc_chart.draw_series(LineSeries::new(
+                lossnacc_t[index]
+                    .iter()
+                    .enumerate()
+                    .map(|loss| (loss.0, loss.1.1)),
+                &PURPLE,
+            ))?;
+        }
+    }
     Ok(())
 }
 fn predict(
     chart: &ChartContext<'_, BitMapBackend<'_>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
     dense1: &mut Layer<300, 2, 64>,
     dense2: &mut Layer<300, 64, 3>,
-    activation1: &mut ActivationReLu<300, 64>,
-    activation2: &mut ActivationSoftmax<300, 3>,
 ) {
-    //let mut activation1 = ActivationReLu::<300, 64>::new();
+    let mut activation1 = ActivationReLu::<300, 64>::new();
 
-    //let mut activation2 = ActivationSoftmax::<300, 3>::new();
+    let mut activation2 = ActivationSoftmax::<300, 3>::new();
     for ii in -50..50 {
         for jj in -50..50 {
             let mut mt = MatrixNM::<300, 2>::zeros();
@@ -589,79 +647,160 @@ fn predict(
         }
     }
 }
-fn randlearn(
+
+fn forwarding(
     dense1: &mut Layer<300, 2, 64>,
     dense2: &mut Layer<300, 64, 3>,
+    act1: &mut ActivationReLu<300, 64>,
+    act2: &mut ActivationSoftmax<300, 3>,
     x: MatrixNM<300, 2>,
     y: MatrixNM<300, 1>,
-) {
-    // let mut loss_lowest = 99999.0;
-    // let mut best_dense1_w = dense1.weights.clone();
-    // let mut best_dense1_b = dense1.biases.clone();
-    // let mut best_dense2_w = dense2.weights.clone();
-    // let mut best_dense2_b = dense2.biases.clone();
-    let mut activation1 = Box::new(ActivationReLu::<300, 64>::new());
-    let mut activation2 = Box::new(ActivationSoftmax::<300, 3>::new());
+    optimizer: &impl Optimizer,
+    iteration: usize,
+) -> (f64, f64) {
     let mut loss_activation =
         Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
+    // let mut dense1 = dense1.clone();
+    // let mut dense2 = dense2.clone();
+    let aa = dense1.forward(x);
+    let bb = act1.forward(aa);
+    let cc = dense2.forward(bb);
+    let result = act2.forward(cc);
+    let loss = loss_activation.forward(result, y);
+    let acc = accuracy(result, y);
+    let dinputs = loss_activation.backward(result, y);
+    
+    let d2b = dense2.backward(dinputs);
+    let a1b = act1.backward(d2b);
+    dense1.backward(a1b);
+    optimizer.update_params::<300, 2, 64>(dense1, iteration);
+    optimizer.update_params::<300, 64, 3>(dense2, iteration);
+    //println!("{loss:.3},{acc:.3}");
+    return (loss, acc);
+}
+
+fn test_forwarding(
+    dense1: &mut Layer<300, 2, 64>,
+    dense2: &mut Layer<300, 64, 3>,
+    act1: &mut ActivationReLu<300, 64>,
+    act2: &mut ActivationSoftmax<300, 3>,
+    x: MatrixNM<300, 2>,
+    y: MatrixNM<300, 1>,
+) -> (f64, f64) {
+    let mut loss_activation =
+        Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
+    let aa = dense1.forward(x);
+    let bb = act1.forward(aa);
+    let cc = dense2.forward(bb);
+    let result = act2.forward(cc);
+    let loss = loss_activation.forward(result, y);
+    let acc = accuracy(result, y);
+    return (loss, acc);
+}
+
+fn randlearn(
+    mut dense1: Layer<300, 2, 64>,
+    mut dense2: Layer<300, 64, 3>,
+
+    x: MatrixNM<300, 2>,
+    y: MatrixNM<300, 1>,
+    x_test: MatrixNM<300, 2>,
+    y_test: MatrixNM<300, 1>,
+    optimizer1: impl Optimizer,
+) -> (
+    Vec<(f64, f64)>,
+    Vec<(f64, f64)>,
+    Vec<(Layer<300, 2, 64>, Layer<300, 64, 3>)>,
+) {
+    let mut activation1 = Box::new(ActivationReLu::<300, 64>::new());
+    let mut activation2 = Box::new(ActivationSoftmax::<300, 3>::new());
+
+    // let mut loss_activation =
+    //     Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
     //let mut th = Vec::new();
-    let mut lossnacc_s = Vec::<(f64, f64)>::new();
+    let mut lns_series = Vec::<(f64, f64)>::new();
+    let mut lns_series_t = Vec::<(f64, f64)>::new();
+    let mut ds_needed = Vec::<(Layer<300, 2, 64>, Layer<300, 64, 3>)>::new();
+    //let mut lossnacc_s = Vec::<(f64, f64)>::new();
     for iteration in 0..=10000 {
-        //let loss_func = LossCategoricalCrossentropy::<300, 3>::new();
+        //let optimizer2 = Optimizer_Adam;
+        let (loss, acc) = forwarding(
+            &mut dense1,
+            &mut dense2,
+            &mut activation1,
+            &mut activation2,
+            x,
+            y,
+            &optimizer1,
+            iteration,
+        );
+        println!("loss:{loss},acc: {acc}");
+        lns_series.push((loss.clone(), acc.clone()));
 
-        // dense1.weights += 0.05 * MatrixNM::new_random();
-        // dense1.biases += 0.05 * MatrixNM::new_random();
-        // dense2.weights += 0.05 * MatrixNM::new_random();
-        // dense2.biases += 0.05 * MatrixNM::new_random();
-
-        let aa = dense1.forward(x);
-        let bb = activation1.forward(aa);
-        let cc = dense2.forward(bb);
-        let result = activation2.forward(cc);
-        let loss = loss_activation.forward(result, y);
-        let acc = accuracy(result, y);
-        //println!("{},{}", result, y);
-
-        let dinputs = loss_activation.backward(result, y);
-        let d2b = dense2.backward(dinputs);
-        let a1b = activation1.backward(d2b);
-        dense1.backward(a1b);
-        let optimizer1 = Optimizer_Adam::<300, 2, 64>;
-        let optimizer2 = Optimizer_Adam::<300, 64, 3>;
-        optimizer1.update_params(dense1, iteration);
-        optimizer2.update_params(dense2, iteration);
-        println!("{loss:.3},{acc:.3}");
-        lossnacc_s.push((loss, acc));
+        let (loss, acc) = test_forwarding(
+            &mut dense1,
+            &mut dense2,
+            &mut activation1,
+            &mut activation2,
+            x_test,
+            y_test,
+        );
+        lns_series_t.push((loss.clone(), acc.clone()));
         if iteration % 1000 == 0 {
-            // let d1c = dense1.clone();
-            // let d2c = dense2.clone();
-
-            //th.push(std::thread::spawn(move || {}));
-            graph(
-                x,
-                y,
-                dense1,
-                dense2,
-                &mut activation1,
-                &mut activation2,
-                iteration,
-                &lossnacc_s,
-            )
-            .expect("error")
+            ds_needed.push((dense1.clone(), dense2.clone()));
         }
     }
+    return (lns_series, lns_series_t, ds_needed);
     // for th in th {
     //     th.join().unwrap();
     // }
 }
 
 fn main() {
-    
     let (x, y) = spiral_data::<100, 3, 300>();
-
-    let mut dense1 = Box::new(Layer::<300, 2, 64>::new());
+    let (x_test, y_test) = spiral_data::<100, 3, 300>();
+    let mut dense1 = Layer::<300, 2, 64>::new();
     //let activation1 = ActivationReLu::<300, 3>::new();
-    let mut dense2 = Box::new(Layer::<300, 64, 3>::new());
-    randlearn(&mut dense1, &mut dense2, x, y);
-    
+    let mut dense2 = Layer::<300, 64, 3>::new();
+
+    let (lnss1, lnss1_t, ds1) = randlearn(
+        dense1.clone(),
+        dense2.clone(),
+        x,
+        y,
+        x_test,
+        y_test,
+        Optimizer_SGD,
+    );
+    let (lnss2, lnss2_t, ds2) = randlearn(
+        dense1.clone(),
+        dense2.clone(),
+        x,
+        y,
+        x_test,
+        y_test,
+        Optimizer_Adagrad,
+    );
+    let (lnss3, lnss3_t, ds3) = randlearn(
+        dense1.clone(),
+        dense2.clone(),
+        x,
+        y,
+        x_test,
+        y_test,
+        Optimizer_RMS,
+    );
+    let (lnss4, lnss4_t, ds4) = randlearn(
+        dense1.clone(),
+        dense2.clone(),
+        x,
+        y,
+        x_test,
+        y_test,
+        Optimizer_Adam,
+    );
+    let lnss = vec![lnss1, lnss2, lnss3, lnss4];
+    let lnss_t = vec![lnss1_t, lnss2_t, lnss3_t, lnss4_t];
+    let ds = vec![ds1, ds2, ds3, ds4];
+    graph(x, y, x_test, y_test, ds, lnss, lnss_t).unwrap();
 }
