@@ -232,9 +232,14 @@ struct Layer<const M: usize, const I: usize, const N: usize> {
     biases_momentum: Box<VectorN<N>>,
     weights_cache: Box<MatrixNM<I, N>>,
     biases_cache: Box<VectorN<N>>,
+
+    weights_l1: f64,
+    weights_l2: f64,
+    biases_l1: f64,
+    biases_l2: f64,
 }
 impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
-    pub fn new() -> Self {
+    pub fn new(weights_l1: f64, weights_l2: f64, biases_l1: f64, biases_l2: f64) -> Self {
         let input = MatrixNM::<M, I>::zeros();
         //let weights = 0.01 * MatrixNM::<I, N>::new_random();
         let mut rng = rand::rng();
@@ -248,6 +253,7 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
         let biases_momentum = VectorN::<N>::zeros();
         let weights_cache = MatrixNM::<I, N>::zeros();
         let biases_cache = VectorN::<N>::zeros();
+
         Self {
             inputs: Box::new(input),
             weights: Box::new(weights),
@@ -259,6 +265,10 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
             biases_momentum: Box::new(biases_momentum),
             weights_cache: Box::new(weights_cache),
             biases_cache: Box::new(biases_cache),
+            weights_l1: weights_l1,
+            weights_l2: weights_l2,
+            biases_l1: biases_l1,
+            biases_l2: biases_l2,
         }
     }
     //M 입력의수
@@ -275,14 +285,49 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
     pub fn backward(&mut self, dvalues: MatrixNM<M, N>) -> MatrixNM<M, I> {
         self.dweights = Box::new(self.inputs.transpose() * dvalues);
         let mut sum = MatrixNM::<N, 1>::zeros();
+        self.dweights = Box::new(
+            *self.dweights + self.weights_l1 * self.weights.map(|w| if w >= 0. { 1. } else { -1. }),
+        );
+        self.dweights = Box::new(*self.dweights + 2. * self.weights_l2 * *self.weights);
         for ii in dvalues.row_iter() {
             for jj in 0..ii.len() {
                 sum[jj] += ii[jj];
             }
         }
         self.dbiases = Box::new(sum);
+        self.dbiases = Box::new(
+            *self.dbiases + self.biases_l1 * self.biases.map(|w| if w >= 0. { 1. } else { -1. }),
+        );
+        self.dbiases = Box::new(*self.dbiases + 2. * self.biases_l2 * *self.biases);
         self.dinputs = Box::new(dvalues * self.weights.transpose());
         return *self.dinputs;
+    }
+    pub fn l1<const A: usize, const B: usize>(&self, weights: &MatrixNM<A, B>) -> f64 {
+        let mut aa = 0.0;
+        for ii in 0..weights.nrows() {
+            let row = weights.row(ii);
+            for jj in row {
+                aa += jj.abs();
+            }
+        }
+        return aa;
+    }
+    pub fn l2<const A: usize, const B: usize>(&self, weights: &MatrixNM<A, B>) -> f64 {
+        let mut aa = 0.0;
+        for ii in 0..weights.nrows() {
+            let row = weights.row(ii);
+            for jj in row {
+                aa += jj.powi(2);
+            }
+        }
+        return aa;
+    }
+    pub fn regulation(&self) -> f64 {
+        let sum = self.weights_l1 * self.l1(&self.weights)
+            + self.biases_l1 * self.l1(&self.biases)
+            + self.weights_l2 * self.l2(&self.weights)
+            + self.biases_l2 * self.l2(&self.biases);
+        sum
     }
 }
 struct Activation_Softmax_Loss_CategoricalCrossentropy<const I: usize, const J: usize> {
@@ -562,18 +607,18 @@ fn graph(
                     .iter()
                     .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
             )?;
-            let loss_max = lossnacc[index]
-                .iter()
-                .map(|x| x.0)
-                .max_by(|a, b| a.total_cmp(b))
-                .unwrap();
+            // let loss_max = lossnacc[index]
+            //     .iter()
+            //     .map(|x| x.0)
+            //     .max_by(|a, b| a.total_cmp(b))
+            //     .unwrap();
 
             let (up, down) = right.split_vertically(240);
 
             let mut loss_chart = ChartBuilder::on(&up)
                 .x_label_area_size(10)
                 .y_label_area_size(10)
-                .build_cartesian_2d(0..10000usize, 0f64..loss_max)?;
+                .build_cartesian_2d(0..10000usize, 0f64..1.0)?;
             let mut acc_chart = ChartBuilder::on(&down)
                 .x_label_area_size(10)
                 .y_label_area_size(10)
@@ -666,10 +711,11 @@ fn forwarding(
     let bb = act1.forward(aa);
     let cc = dense2.forward(bb);
     let result = act2.forward(cc);
-    let loss = loss_activation.forward(result, y);
+
+    let loss = loss_activation.forward(cc, y) + dense1.regulation() + dense2.regulation();
+
     let acc = accuracy(result, y);
     let dinputs = loss_activation.backward(result, y);
-    
     let d2b = dense2.backward(dinputs);
     let a1b = act1.backward(d2b);
     dense1.backward(a1b);
@@ -693,7 +739,7 @@ fn test_forwarding(
     let bb = act1.forward(aa);
     let cc = dense2.forward(bb);
     let result = act2.forward(cc);
-    let loss = loss_activation.forward(result, y);
+    let loss = loss_activation.forward(cc, y);
     let acc = accuracy(result, y);
     return (loss, acc);
 }
@@ -759,9 +805,9 @@ fn randlearn(
 fn main() {
     let (x, y) = spiral_data::<100, 3, 300>();
     let (x_test, y_test) = spiral_data::<100, 3, 300>();
-    let mut dense1 = Layer::<300, 2, 64>::new();
+    let mut dense1 = Layer::<300, 2, 64>::new(0.0, 5e-4, 0.0, 5e-4);
     //let activation1 = ActivationReLu::<300, 3>::new();
-    let mut dense2 = Layer::<300, 64, 3>::new();
+    let mut dense2 = Layer::<300, 64, 3>::new(0.0, 0.0, 0.0, 0.0);
 
     let (lnss1, lnss1_t, ds1) = randlearn(
         dense1.clone(),
