@@ -330,6 +330,35 @@ impl<const M: usize, const I: usize, const N: usize> Layer<M, I, N> {
         sum
     }
 }
+
+struct DropoutLayer<const I: usize, const J: usize> {
+    binary_mask: MatrixNM<I, J>,
+    p: f64,
+}
+impl<const I: usize, const J: usize> DropoutLayer<I, J> {
+    pub fn new(p: f64) -> Self {
+        let binary_mask = MatrixNM::<I, J>::zeros();
+        Self {
+            p: p,
+            binary_mask: binary_mask,
+        }
+    }
+
+    fn forward(&mut self, input: MatrixNM<I, J>) -> MatrixNM<I, J> {
+        for ii in 0..I {
+            for jj in 0..J {
+                if !rand::random_bool(self.p) {
+                    self.binary_mask[(ii, jj)] = 1.0 / (1.0 - self.p);
+                }
+            }
+        }
+        return input.zip_map(&self.binary_mask, |input, mask| input * mask);
+    }
+    fn backward(&self, dvalue: MatrixNM<I, J>) -> MatrixNM<I, J> {
+        return dvalue.zip_map(&self.binary_mask, |dvalue, mask| dvalue * mask);
+    }
+}
+
 struct Activation_Softmax_Loss_CategoricalCrossentropy<const I: usize, const J: usize> {
     activation: ActivationSoftmax<I, J>,
     loss: LossCategoricalCrossentropy<I, J>,
@@ -666,6 +695,7 @@ fn predict(
     let mut activation1 = ActivationReLu::<300, 64>::new();
 
     let mut activation2 = ActivationSoftmax::<300, 3>::new();
+
     for ii in -50..50 {
         for jj in -50..50 {
             let mut mt = MatrixNM::<300, 2>::zeros();
@@ -674,6 +704,7 @@ fn predict(
 
             let aa = dense1.forward(mt);
             let bb = activation1.forward(aa);
+
             let cc = dense2.forward(bb);
             let result = activation2.forward(cc);
 
@@ -698,6 +729,7 @@ fn forwarding(
     dense2: &mut Layer<300, 64, 3>,
     act1: &mut ActivationReLu<300, 64>,
     act2: &mut ActivationSoftmax<300, 3>,
+    drop1: &mut DropoutLayer<300, 64>,
     x: MatrixNM<300, 2>,
     y: MatrixNM<300, 1>,
     optimizer: &impl Optimizer,
@@ -709,7 +741,8 @@ fn forwarding(
     // let mut dense2 = dense2.clone();
     let aa = dense1.forward(x);
     let bb = act1.forward(aa);
-    let cc = dense2.forward(bb);
+    let dl = drop1.forward(bb);
+    let cc = dense2.forward(dl);
     let result = act2.forward(cc);
 
     let loss = loss_activation.forward(cc, y) + dense1.regulation() + dense2.regulation();
@@ -717,7 +750,8 @@ fn forwarding(
     let acc = accuracy(result, y);
     let dinputs = loss_activation.backward(result, y);
     let d2b = dense2.backward(dinputs);
-    let a1b = act1.backward(d2b);
+    let dlb = drop1.backward(d2b);
+    let a1b = act1.backward(dlb);
     dense1.backward(a1b);
     optimizer.update_params::<300, 2, 64>(dense1, iteration);
     optimizer.update_params::<300, 64, 3>(dense2, iteration);
@@ -760,7 +794,7 @@ fn randlearn(
 ) {
     let mut activation1 = Box::new(ActivationReLu::<300, 64>::new());
     let mut activation2 = Box::new(ActivationSoftmax::<300, 3>::new());
-
+    let mut drop1 = DropoutLayer::new(0.1);
     // let mut loss_activation =
     //     Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
     //let mut th = Vec::new();
@@ -775,6 +809,7 @@ fn randlearn(
             &mut dense2,
             &mut activation1,
             &mut activation2,
+            &mut drop1,
             x,
             y,
             &optimizer1,
