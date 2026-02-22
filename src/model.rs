@@ -4,18 +4,17 @@ use crate::loss::*;
 use crate::optimizer::*;
 use crate::types::*;
 fn forwarding(
-    dense1: &mut Layer<300, 2, 64>,
-    dense2: &mut Layer<300, 64, 3>,
+    dense1: &mut Layer<300, 1, 64>,
+    dense2: &mut Layer<300, 64, 1>,
     act1: &mut ActivationReLu<300, 64>,
-    act2: &mut ActivationSoftmax<300, 3>,
+    act2: &mut ActivationLiner<300, 1>,
     drop1: &mut DropoutLayer<300, 64>,
-    x: MatrixNM<300, 2>,
+    x: MatrixNM<300, 1>,
     y: MatrixNM<300, 1>,
     optimizer: &impl Optimizer,
     iteration: usize,
 ) -> (f64, f64) {
-    let mut loss_activation =
-        Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
+    let mut loss_activation = Box::new(Loss_MeanSquaredError::<300, 1>::new());
     // let mut dense1 = dense1.clone();
     // let mut dense2 = dense2.clone();
     let aa = dense1.forward(x);
@@ -32,54 +31,57 @@ fn forwarding(
     let dlb = drop1.backward(d2b);
     let a1b = act1.backward(dlb);
     dense1.backward(a1b);
-    optimizer.update_params::<300, 2, 64>(dense1, iteration);
-    optimizer.update_params::<300, 64, 3>(dense2, iteration);
+    optimizer.update_params::<300, 1, 64>(dense1, iteration);
+    optimizer.update_params::<300, 64, 1>(dense2, iteration);
     //println!("{loss:.3},{acc:.3}");
     return (loss, acc);
 }
 
 fn test_forwarding(
-    dense1: &mut Layer<300, 2, 64>,
-    dense2: &mut Layer<300, 64, 3>,
+    dense1: &mut Layer<300, 1, 64>,
+    dense2: &mut Layer<300, 64, 1>,
     act1: &mut ActivationReLu<300, 64>,
-    act2: &mut ActivationSoftmax<300, 3>,
-    x: MatrixNM<300, 2>,
+    act2: &mut ActivationLiner<300, 1>,
+    x: MatrixNM<300, 1>,
     y: MatrixNM<300, 1>,
 ) -> (f64, f64) {
-    let mut loss_activation =
-        Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
-    let aa = dense1.forward(x);
-    let bb = act1.forward(aa);
-    let cc = dense2.forward(bb);
-    let result = act2.forward(cc);
-    let loss = loss_activation.forward(cc, y);
-    let acc = accuracy(result, y);
-    return (loss, acc);
+    // let mut loss_activation =
+    //     Box::new(ActivationLiner::<300, 1>::new());
+    // let aa = dense1.forward(x);
+    // let bb = act1.forward(aa);
+    // let cc = dense2.forward(bb);
+    // let result = act2.forward(cc);
+    // let loss = loss_activation.forward(cc, y);
+    // let acc = accuracy(result, y);
+    // return (loss, acc);
+    return (0.0, 0.0);
 }
 
 pub fn randlearn(
-    mut dense1: Layer<300, 2, 64>,
-    mut dense2: Layer<300, 64, 3>,
+    mut dense1: Layer<300, 1, 64>,
+    mut dense2: Layer<300, 64, 1>,
 
-    x: MatrixNM<300, 2>,
+    x: MatrixNM<300, 1>,
     y: MatrixNM<300, 1>,
-    x_test: MatrixNM<300, 2>,
+    x_test: MatrixNM<300, 1>,
     y_test: MatrixNM<300, 1>,
     optimizer1: impl Optimizer,
 ) -> (
     Vec<(f64, f64)>,
     Vec<(f64, f64)>,
-    Vec<(Layer<300, 2, 64>, Layer<300, 64, 3>)>,
+    Vec<(Layer<300, 1, 64>, Layer<300, 64, 1>)>,
 ) {
     let mut activation1 = Box::new(ActivationReLu::<300, 64>::new());
-    let mut activation2 = Box::new(ActivationSoftmax::<300, 3>::new());
+    let mut activation2 = Box::new(ActivationLiner::<300, 1>::new());
     let mut drop1 = DropoutLayer::new(0.1);
     // let mut loss_activation =
     //     Box::new(Activation_Softmax_Loss_CategoricalCrossentropy::<300, 3>::new());
     //let mut th = Vec::new();
     let mut lns_series = Vec::<(f64, f64)>::new();
     let mut lns_series_t = Vec::<(f64, f64)>::new();
-    let mut ds_needed = Vec::<(Layer<300, 2, 64>, Layer<300, 64, 3>)>::new();
+    let mut ds_needed = Vec::<(Layer<300, 1, 64>, Layer<300, 64, 1>)>::new();
+    let accuracy_precision = y.variance() / 250.0;
+
     //let mut lossnacc_s = Vec::<(f64, f64)>::new();
     for iteration in 0..=10000 {
         //let optimizer2 = Optimizer_Adam;

@@ -5,11 +5,11 @@ use plotters::coord::types::RangedCoordf64;
 use plotters::prelude::*;
 use plotters::style::full_palette::PURPLE;
 pub fn graph(
-    pointx: MatrixNM<300, 2>,
+    pointx: MatrixNM<300, 1>,
     what: MatrixNM<300, 1>,
-    testx: MatrixNM<300, 2>,
+    testx: MatrixNM<300, 1>,
     what_t: MatrixNM<300, 1>,
-    dense1: Vec<Vec<(Layer<300, 2, 64>, Layer<300, 64, 3>)>>,
+    dense1: Vec<Vec<(Layer<300, 1, 64>, Layer<300, 64, 1>)>>,
     lossnacc: Vec<Vec<(f64, f64)>>,
     lossnacc_t: Vec<Vec<(f64, f64)>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -18,50 +18,50 @@ pub fn graph(
 
         let root = BitMapBackend::new(&p, (1000, 1920)).into_drawing_area();
         root.fill(&WHITE)?;
-        let areas= root.split_evenly((4, 1));
+        let areas = root.split_evenly((4, 1));
         for (index, root) in areas.iter().enumerate() {
             let (left, right) = root.split_horizontally(600);
             let mut chart = ChartBuilder::on(&left)
                 // .x_label_area_size(40)
                 // .y_label_area_size(40)
-                .build_cartesian_2d(-1f64..1f64, -1f64..1f64)?;
-            let px = pointx.column(0);
-            let py = pointx.column(1);
+                .build_cartesian_2d(0f64..1f64, -1f64..1f64)?;
+            let px = pointx;
+            let py = what;
             let mut pxy = Vec::new();
             predict(
-                &chart,
+                &mut chart,
                 &mut dense1[index][ii].0.clone(),
                 &mut dense1[index][ii].1.clone(),
             );
             for ii in 0..pointx.nrows() {
-                let mut color = RGBColor(0, 0, 0);
-                if what[ii] as usize == 0 {
-                    color = RGBColor(255, 0, 0);
-                }
-                if what[ii] as usize == 1 {
-                    color = RGBColor(0, 255, 0);
-                }
-                if what[ii] as usize == 2 {
-                    color = RGBColor(0, 0, 255);
-                }
-                pxy.push((px[ii], py[ii], color));
+                //let mut color = RGBColor(0, 0, 0);
+                // if what[ii] as usize == 0 {
+                //     color = RGBColor(255, 0, 0);
+                // }
+                // if what[ii] as usize == 1 {
+                //     color = RGBColor(0, 255, 0);
+                // }
+                // if what[ii] as usize == 2 {
+                //     color = RGBColor(0, 0, 255);
+                // }
+                pxy.push((px[ii], py[ii], BLACK));
             }
-            let px = testx.column(0);
-            let py = testx.column(1);
-            let mut pxy_t = Vec::new();
-            for ii in 0..testx.nrows() {
-                let mut color = RGBColor(0, 0, 0);
-                if what_t[ii] as usize == 0 {
-                    color = RGBColor(255, 0, 0);
-                }
-                if what_t[ii] as usize == 1 {
-                    color = RGBColor(0, 255, 0);
-                }
-                if what_t[ii] as usize == 2 {
-                    color = RGBColor(0, 0, 255);
-                }
-                pxy_t.push((px[ii], py[ii], color));
-            }
+            // let px = testx.column(0);
+            // let py = testx.column(1);
+            // let mut pxy_t = Vec::new();
+            // for ii in 0..testx.nrows() {
+            //     let mut color = RGBColor(0, 0, 0);
+            //     if what_t[ii] as usize == 0 {
+            //         color = RGBColor(255, 0, 0);
+            //     }
+            //     if what_t[ii] as usize == 1 {
+            //         color = RGBColor(0, 255, 0);
+            //     }
+            //     if what_t[ii] as usize == 2 {
+            //         color = RGBColor(0, 0, 255);
+            //     }
+            //     pxy_t.push((px[ii], py[ii], color));
+            // }
             chart
                 .configure_mesh()
                 .disable_axes()
@@ -71,11 +71,11 @@ pub fn graph(
                 pxy.iter()
                     .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
             )?;
-            chart.draw_series(
-                pxy_t
-                    .iter()
-                    .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
-            )?;
+            // chart.draw_series(
+            //     pxy_t
+            //         .iter()
+            //         .map(|(x, y, c)| Circle::new((*x, *y), 2, c.filled())),
+            // )?;
             // let loss_max = lossnacc[index]
             //     .iter()
             //     .map(|x| x.0)
@@ -129,38 +129,43 @@ pub fn graph(
 }
 
 fn predict(
-    chart: &ChartContext<'_, BitMapBackend<'_>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
-    dense1: &mut Layer<300, 2, 64>,
-    dense2: &mut Layer<300, 64, 3>,
+    chart: &mut ChartContext<'_, BitMapBackend<'_>, Cartesian2d<RangedCoordf64, RangedCoordf64>>,
+    dense1: &mut Layer<300, 1, 64>,
+    dense2: &mut Layer<300, 64, 1>,
 ) {
     let mut activation1 = ActivationReLu::<300, 64>::new();
 
-    let mut activation2 = ActivationSoftmax::<300, 3>::new();
+    let mut activation2 = ActivationLiner::<300, 1>::new();
+    let mut lines = Vec::new();
+    for ii in 0..100 {
+        // for jj in -50..50 {
+        let mut mt = MatrixNM::<300, 1>::zeros();
+        mt[(0, 0)] = ii as f64 / 100 as f64;
+        //mt[(0, 1)] = jj as f64 / 50 as f64;
 
-    for ii in -50..50 {
-        for jj in -50..50 {
-            let mut mt = MatrixNM::<300, 2>::zeros();
-            mt[(0, 0)] = ii as f64 / 50 as f64;
-            mt[(0, 1)] = jj as f64 / 50 as f64;
+        let aa = dense1.forward(mt);
+        let bb = activation1.forward(aa);
 
-            let aa = dense1.forward(mt);
-            let bb = activation1.forward(aa);
+        let cc = dense2.forward(bb);
+        let result = activation2.forward(cc);
 
-            let cc = dense2.forward(bb);
-            let result = activation2.forward(cc);
+        let result = result.row(0).transpose();
+        // let color = RGBAColor(
+        //     (result[0] * 255f64) as u8,
+        //     (result[1] * 255 as f64) as u8,
+        //     (result[2] * 255.0) as u8,
+        //     0.3,
+        // );
+        //let mut color = [RED, GREEN, BLUE][result].to_rgba();
+        //color.3 = (result.1) * 0.1;
 
-            let result = result.row(0).transpose();
-            let color = RGBAColor(
-                (result[0] * 255f64) as u8,
-                (result[1] * 255 as f64) as u8,
-                (result[2] * 255.0) as u8,
-                0.3,
-            );
-            //let mut color = [RED, GREEN, BLUE][result].to_rgba();
-            //color.3 = (result.1) * 0.1;
+        //let circle = Circle::new((mt[(0, 0)], mt[(0, 1)]), 4, BLACK);
+        lines.push((mt[(0, 0)], result[(0, 0)]));
 
-            let circle = Circle::new((mt[(0, 0)], mt[(0, 1)]), 4, color.filled());
-            chart.plotting_area().draw(&circle).expect("error");
-        }
+        //chart.plotting_area().draw(&circle).expect("error");
+        //}
     }
+    chart
+        .draw_series(LineSeries::new(lines.into_iter(), &RED))
+        .unwrap();
 }

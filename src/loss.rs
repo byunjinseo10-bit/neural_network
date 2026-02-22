@@ -1,3 +1,5 @@
+use nalgebra::Matrix;
+
 use crate::activation::*;
 use crate::types::*;
 pub struct LossCategoricalCrossentropy<const N: usize, const M: usize> {
@@ -90,5 +92,50 @@ impl<const I: usize, const J: usize> Activation_Softmax_Loss_CategoricalCrossent
         }
         self.dinputs = self.dinputs / samples as f64;
         return self.dinputs;
+    }
+}
+
+pub struct Loss_MeanSquaredError<const N: usize, const M: usize> {
+    dinputs: MatrixNM<N, M>,
+}
+
+impl<const N: usize, const M: usize> Loss_MeanSquaredError<N, M> {
+    pub fn new() -> Self {
+        let dinput = MatrixNM::<N, M>::zeros();
+        Self { dinputs: dinput }
+    }
+    pub fn forward(&self, y_pred: MatrixNM<N, M>, y_ture: MatrixNM<N, M>) -> f64 {
+        let mut temp = 0.0;
+        for ii in 0..y_pred.nrows() {
+            temp += (y_pred[(ii, 0)] - y_ture[(ii, 0)]).powi(2);
+        }
+        temp = temp / (N as f64);
+        return temp;
+    }
+    pub fn backward(&mut self, dvalues: MatrixNM<N, M>, y_ture: MatrixNM<N, M>) -> MatrixNM<N, M> {
+        self.dinputs = y_ture.zip_map(&dvalues, |y_true, dvalue| {
+            (-2.0 * (y_true - dvalue) / (M as f64)) / (N as f64)
+        });
+        return self.dinputs;
+    }
+}
+
+pub struct Loss_MeanAbsoluteError<const N: usize, const M: usize> {
+    dinputs: MatrixNM<N, M>,
+}
+impl<const N: usize, const M: usize> Loss_MeanAbsoluteError<N, M> {
+    fn forward(&self, y_pred: MatrixNM<N, M>, y_ture: MatrixNM<N, M>) -> f64 {
+        let mut temp = 0.0;
+        for ii in 0..y_pred.nrows() {
+            temp += (y_pred[(ii, 0)] - y_ture[(ii, 0)]).abs();
+        }
+        temp = temp / (N as f64);
+        return temp;
+    }
+
+    fn backward(&mut self, dvalues: MatrixNM<N, M>, y_ture: MatrixNM<N, M>) {
+        self.dinputs = y_ture.zip_map(&dvalues, |y_true, dvalue| {
+            ((y_true - dvalue).sin() / (M as f64)) / (N as f64)
+        });
     }
 }

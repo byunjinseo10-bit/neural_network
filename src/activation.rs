@@ -1,3 +1,5 @@
+use plotters::chart::DualCoordChartContext;
+
 use crate::types::*;
 pub struct ActivationReLu<const N: usize, const M: usize> {
     inputs: MatrixNM<N, M>,
@@ -73,5 +75,32 @@ impl<const I: usize, const J: usize> ActivationSoftmax<I, J> {
         }
         self.outputs = result.clone();
         result
+    }
+}
+
+pub struct ActivationLiner<const N: usize, const M: usize> {
+    input: MatrixNM<N, M>,
+    output: MatrixNM<N, M>,
+    dinputs: MatrixNM<N, M>,
+}
+
+impl<const N: usize, const M: usize> ActivationLiner<N, M> {
+    pub fn new() -> Self {
+        let input = MatrixNM::<N, M>::zeros();
+        let output = MatrixNM::<N, M>::zeros();
+        let dinputs = MatrixNM::<N, M>::zeros();
+        Self {
+            input: input,
+            output: output,
+            dinputs: dinputs,
+        }
+    }
+
+    pub fn forward(&mut self, input: MatrixNM<N, M>)->MatrixNM<N,M> {
+        self.input = input;
+        input
+    }
+    pub fn backward(&mut self, dvalues: MatrixNM<N, M>) {
+        self.dinputs = dvalues.clone();
     }
 }

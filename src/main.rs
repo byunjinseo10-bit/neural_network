@@ -14,11 +14,12 @@ use crate::optimizer::*;
 // use nalgebra::zero;
 
 fn main() {
-    let (x, y) = spiral_data::<100, 3, 300>();
-    let (x_test, y_test) = spiral_data::<100, 3, 300>();
-    let dense1 = Layer::<300, 2, 64>::new(0.0, 5e-4, 0.0, 5e-4);
+    let (x, y) = sine_data::<300>();
+    
+    let (x_test, y_test) = sine_data::<300>();
+    let dense1 = Layer::<300, 1, 64>::new(0.0, 5e-4, 0.0, 5e-4);
     //let activation1 = ActivationReLu::<300, 3>::new();
-    let dense2 = Layer::<300, 64, 3>::new(0.0, 0.0, 0.0, 0.0);
+    let dense2 = Layer::<300, 64, 1>::new(0.0, 0.0, 0.0, 0.0);
 
     let (lnss1, lnss1_t, ds1) = randlearn(
         dense1.clone(),

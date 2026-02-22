@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use crate::types::*;
 use rand::Rng;
 use rand_distr::Distribution;
@@ -48,4 +50,14 @@ pub fn spiral_data<const SAMPLES: usize, const CLASSES: usize, const TOTAL: usiz
         }
     }
     (x, y)
+}
+
+pub fn sine_data<const N: usize>() -> (VectorN<N>, VectorN<N>) {
+    let mut x = VectorN::<N>::zeros();
+    let mut y = VectorN::<N>::zeros();
+    for ii in 0..N {
+        x[(ii, 0)] = (ii as f64) / (N as f64);
+        y[(ii, 0)] = (x[(ii, 0)] * 2.0 * (PI)).sin();
+    }
+    return (x, y);
 }
